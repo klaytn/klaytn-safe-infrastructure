@@ -2,6 +2,7 @@ version: "3.8"
 
 volumes:
   nginx-shared-txs:
+  nginx-shared-txs-cypress:
   nginx-shared-cfg:
 
 x-healthcheck-db-template: &pghealthcheck
@@ -30,6 +31,7 @@ services:
       - nginx-shared-cfg:/nginx-cfg
     depends_on:
       - txs-web
+      - txs-web-cypress
       - cfg-web
       - cgw-web
       - events-web
@@ -63,12 +65,19 @@ services:
   txs-redis:
     image: redis:alpine
     <<: *redishealthcheck
+  
+  txs-redis-cypress:
+    image: redis:alpine
+    <<: *redishealthcheck
 
   txs-rabbitmq:
     image: rabbitmq:alpine
 
+  txs-rabbitmq-cypress:
+    image: rabbitmq:alpine
+
   txs-web:
-    image: safeglobal/safe-transaction-service:${TXS_VERSION}
+    image: klaytn/safe-transaction-service:${TXS_VERSION}
     env_file:
       - container_env_files/txs.env
     environment:
@@ -83,8 +92,24 @@ services:
       - nginx-shared-txs:/nginx
     command: docker/web/run_web.sh
 
+  txs-web-cypress:
+    image: klaytn/safe-transaction-service:${TXS_VERSION}
+    env_file:
+      - container_env_files/txs-cypress.env
+    environment:
+      - ETHEREUM_NODE_URL=${RPC_NODE_URL_CYPRESS}
+    depends_on:
+      txs-db-cypress:
+        condition: service_healthy
+      txs-redis-cypress:
+        condition: service_healthy
+    working_dir: /app
+    volumes:
+      - nginx-shared-txs:/nginx
+    command: docker/web/run_web.sh
+
   txs-worker-indexer: &txs-worker
-    image: safeglobal/safe-transaction-service:${TXS_VERSION}
+    image: klaytn/safe-transaction-service:${TXS_VERSION}
     env_file:
       - container_env_files/txs.env
     environment:
@@ -95,6 +120,21 @@ services:
       txs-db:
         condition: service_healthy
       txs-redis:
+        condition: service_healthy
+    command: docker/web/celery/worker/run.sh
+
+  txs-worker-indexer-cypress: &txs-worker-cypress
+    image: klaytn/safe-transaction-service:${TXS_VERSION}
+    env_file:
+      - container_env_files/txs-cypress.env
+    environment:
+      - ETHEREUM_NODE_URL=${RPC_NODE_URL_CYPRESS}
+      - RUN_MIGRATIONS=1
+      - WORKER_QUEUES=default,indexing
+    depends_on:
+      txs-db-cypress:
+        condition: service_healthy
+      txs-redis-cypress:
         condition: service_healthy
     command: docker/web/celery/worker/run.sh
 
@@ -109,6 +149,17 @@ services:
       txs-redis:
         condition: service_healthy
 
+  txs-worker-contracts-tokens-cypress:
+    <<: *txs-worker-cypress
+    environment:
+      - WORKER_QUEUES=contracts,tokens
+      - ETHEREUM_NODE_URL=${RPC_NODE_URL_CYPRESS}
+    depends_on:
+      txs-db-cypress:
+        condition: service_healthy
+      txs-redis-cypress:
+        condition: service_healthy
+
   txs-worker-notifications-webhooks:
     <<: *txs-worker
     environment:
@@ -120,12 +171,32 @@ services:
       txs-redis:
         condition: service_healthy
 
+  txs-worker-notifications-webhooks-cypress:
+    <<: *txs-worker-cypress
+    environment:
+      - WORKER_QUEUES=notifications,webhooks
+      - ETHEREUM_NODE_URL=${RPC_NODE_URL_CYPRESS}
+    depends_on:
+      txs-db-cypress:
+        condition: service_healthy
+      txs-redis-cypress:
+        condition: service_healthy
+
   txs-scheduler:
     <<: *txs-worker
     depends_on:
       txs-db:
         condition: service_healthy
       txs-redis:
+        condition: service_healthy
+    command: docker/web/celery/scheduler/run.sh
+
+  txs-scheduler-cypress:
+    <<: *txs-worker-cypress
+    depends_on:
+      txs-db-cypress:
+        condition: service_healthy
+      txs-redis-cypress:
         condition: service_healthy
     command: docker/web/celery/scheduler/run.sh
 
@@ -155,7 +226,7 @@ services:
         condition: service_healthy
 
   ui:
-    image: safeglobal/safe-wallet-web:${UI_VERSION}
+    image: klaytn/safe-wallet-web:${UI_VERSION}
     env_file:
       - container_env_files/ui.env
     depends_on:
